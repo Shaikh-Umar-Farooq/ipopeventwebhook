@@ -200,6 +200,33 @@ async function storeInDatabase(ticketData) {
   }
 }
 
+// Initialize logs storage
+if (typeof global.webhookLogs === 'undefined') {
+  global.webhookLogs = [];
+}
+
+// Helper function to add log entry
+function addLog(type, message, details = null) {
+  const logEntry = {
+    id: Date.now() + Math.random(),
+    type, // 'success', 'error', 'info', 'warning'
+    message,
+    details,
+    timestamp: new Date().toISOString(),
+    time: new Date().toLocaleTimeString()
+  };
+  
+  // Add to beginning of array (most recent first)
+  global.webhookLogs.unshift(logEntry);
+  
+  // Keep only last 100 logs to prevent memory issues
+  if (global.webhookLogs.length > 100) {
+    global.webhookLogs = global.webhookLogs.slice(0, 100);
+  }
+  
+  console.log(`[LOG ${type.toUpperCase()}] ${message}`, details || '');
+}
+
 // Verify Razorpay signature
 function verifySignature(body, signature) {
   if (!RAZORPAY_WEBHOOK_SECRET) {
@@ -228,25 +255,40 @@ module.exports = async (req, res) => {
   }
 
   if (req.method !== 'POST') {
+    // Log status check
+    addLog('info', 'Webhook status check - endpoint is active', {
+      method: req.method,
+      url: req.url
+    });
+    
     return res.status(200).json({ 
       status: 'ok', 
       message: 'Webhook endpoint is active',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      totalLogs: (global.webhookLogs || []).length,
+      recentLogs: (global.webhookLogs || []).slice(0, 5)
     });
   }
 
   try {
     const signature = req.headers['x-razorpay-signature'];
     
+    // Log incoming webhook
+    addLog('info', 'Webhook request received', {
+      method: req.method,
+      headers: Object.keys(req.headers),
+      hasSignature: !!signature
+    });
+    
     // Verify signature
     if (!verifySignature(req.body, signature)) {
-      console.error('Invalid signature');
+      addLog('error', 'Invalid webhook signature', { signature: signature ? 'present' : 'missing' });
       return res.status(400).json({ error: 'Invalid signature' });
     }
 
     const { event, payload } = req.body;
     
-    console.log('Webhook received:', event);
+    addLog('info', `Webhook event received: ${event}`, { event, payloadKeys: Object.keys(payload || {}) });
 
     let payment, customer, itemDescription, paymentLinkId;
     
@@ -256,6 +298,7 @@ module.exports = async (req, res) => {
       const paymentLink = payload.payment_link?.entity;
       
       if (!paymentLink) {
+        addLog('error', 'Invalid payment_link.paid payload - payment_link.entity missing', { payload });
         return res.status(400).json({ 
           status: 'error', 
           message: 'Invalid payment_link.paid payload' 
@@ -264,6 +307,7 @@ module.exports = async (req, res) => {
       
       // Check if it's our payment link (if payment link ID is specified)
       if (TARGET_PAYMENT_LINK_ID && paymentLink.id !== TARGET_PAYMENT_LINK_ID) {
+        addLog('warning', `Payment link ID mismatch. Expected: ${TARGET_PAYMENT_LINK_ID}, Got: ${paymentLink.id}`);
         return res.status(200).json({ 
           status: 'ignored', 
           message: 'Different payment link ID' 
@@ -280,6 +324,7 @@ module.exports = async (req, res) => {
       payment = payload.payment?.entity;
       
       if (!payment) {
+        addLog('error', 'Invalid payment.captured payload - payment.entity missing', { payload });
         return res.status(400).json({ 
           status: 'error', 
           message: 'Invalid payment.captured payload' 
@@ -299,6 +344,7 @@ module.exports = async (req, res) => {
       const order = payload.order?.entity;
       
       if (!order) {
+        addLog('error', 'Invalid order.paid payload - order.entity missing', { payload });
         return res.status(400).json({ 
           status: 'error', 
           message: 'Invalid order.paid payload' 
@@ -316,7 +362,11 @@ module.exports = async (req, res) => {
       
     } else {
       // Log other events but don't process
-      console.log(`Event ${event} received but not processed`);
+      addLog('warning', `Unsupported event type: ${event}`, { 
+        event, 
+        supportedEvents: ['payment_link.paid', 'payment.captured', 'order.paid'],
+        payload: payload 
+      });
       return res.status(200).json({ 
         status: 'ignored', 
         message: `Event ${event} not handled. Supported events: payment_link.paid, payment.captured, order.paid` 
@@ -325,6 +375,7 @@ module.exports = async (req, res) => {
 
     // Validate payment exists
     if (!payment || !payment.id) {
+      addLog('error', 'Payment information not found in payload', { event, payload });
       return res.status(400).json({ 
         status: 'error', 
         message: 'Payment information not found in payload' 
@@ -347,31 +398,57 @@ module.exports = async (req, res) => {
       date_purchased: new Date(payment.created_at * 1000).toISOString().split('T')[0]
     };
 
-    console.log(`Processing ticket for event ${event}:`, ticketId);
-
-    // Generate QR code
-    const qrCodeDataUrl = await generateQRCode(ticketData);
-    console.log('QR code generated');
-
-    // Store in database
-    await storeInDatabase(ticketData);
-    console.log('Data stored in database');
-
-    // Send email
-    if (ticketData.email) {
-      await sendTicketEmail(ticketData, qrCodeDataUrl);
-      console.log('Email sent to:', ticketData.email);
-    } else {
-      console.warn('No email address found, skipping email send');
-    }
-
-    return res.status(200).json({ 
-      status: 'success',
-      message: 'Ticket processed successfully',
-      ticket_id: ticketId
+    addLog('info', `Processing payment for ticket: ${ticketId}`, {
+      event,
+      payment_id: payment.id,
+      amount: ticketData.prize_paid,
+      email: ticketData.email
     });
 
+    try {
+      // Generate QR code
+      const qrCodeDataUrl = await generateQRCode(ticketData);
+      addLog('info', 'QR code generated successfully', { ticket_id: ticketId });
+
+      // Store in database
+      await storeInDatabase(ticketData);
+      addLog('success', 'Ticket stored in database', { ticket_id: ticketId, payment_id: payment.id });
+
+      // Send email
+      if (ticketData.email) {
+        await sendTicketEmail(ticketData, qrCodeDataUrl);
+        addLog('success', 'Ticket email sent', { ticket_id: ticketId, email: ticketData.email });
+      } else {
+        addLog('warning', 'No email address found, skipping email send', { ticket_id: ticketId });
+      }
+
+      addLog('success', `Ticket processed successfully: ${ticketId}`, {
+        ticket_id: ticketId,
+        payment_id: payment.id,
+        customer: ticketData.name,
+        amount: ticketData.prize_paid
+      });
+
+      return res.status(200).json({ 
+        status: 'success',
+        message: 'Ticket processed successfully',
+        ticket_id: ticketId
+      });
+    } catch (processError) {
+      addLog('error', 'Error processing ticket', {
+        ticket_id: ticketId,
+        error: processError.message,
+        stack: processError.stack
+      });
+      throw processError; // Re-throw to be caught by outer catch
+    }
+
   } catch (error) {
+    addLog('error', 'Webhook processing error', {
+      error: error.message,
+      stack: error.stack,
+      body: req.body
+    });
     console.error('Webhook error:', error);
     return res.status(500).json({ 
       error: 'Internal server error',
