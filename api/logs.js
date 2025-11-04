@@ -12,9 +12,19 @@ module.exports = async (req, res) => {
       return res.status(405).json({ error: 'Method not allowed' });
     }
   
-    return res.status(200).json({
-      logs: global.webhookLogs || [],
-      count: (global.webhookLogs || []).length,
-      timestamp: new Date().toISOString()
-    });
+  // Format logs to ensure consistent structure
+  const logs = (global.webhookLogs || []).map(log => ({
+    id: log.id || Date.now(),
+    type: log.type || 'info',
+    message: log.message || 'No message',
+    details: log.details || null,
+    timestamp: log.timestamp || new Date().toISOString(),
+    time: log.time || new Date().toLocaleTimeString()
+  }));
+
+  return res.status(200).json({
+    logs: logs,
+    count: logs.length,
+    timestamp: new Date().toISOString()
+  });
   };
