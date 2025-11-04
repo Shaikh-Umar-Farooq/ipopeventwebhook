@@ -4,9 +4,330 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>iPOP Webhook Monitor</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React and ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel Standalone for JSX transformation -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Lucide React Icons -->
+  <script src="https://unpkg.com/lucide-react@latest/dist/umd/lucide-react.js"></script>
 </head>
 <body>
   <div id="root"></div>
-  <!-- The React dashboard will load here -->
+  
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const { CheckCircle, XCircle, Loader2, Database, Mail, QrCode, Webhook, AlertCircle, RefreshCw, Send } = lucideReact;
+
+    const RazorpayWebhookMonitor = () => {
+      const [logs, setLogs] = useState([]);
+      const [testing, setTesting] = useState(false);
+      const [loading, setLoading] = useState(false);
+      const [config, setConfig] = useState(null);
+      const [autoRefresh, setAutoRefresh] = useState(false);
+
+      // Replace with your actual Vercel URL
+      const API_BASE = 'https://ipopeventwebhook-4n8i.vercel.app';
+
+      // Check webhook status
+      const checkStatus = async () => {
+        try {
+          const response = await fetch(`${API_BASE}/api/razorpay-webhook`);
+          const data = await response.json();
+          setConfig(data.config);
+          addLocalLog('success', '✅ Webhook is active', data);
+        } catch (error) {
+          addLocalLog('error', '❌ Failed to connect to webhook: ' + error.message);
+        }
+      };
+
+      // Fetch logs from server
+      const fetchLogs = async () => {
+        setLoading(true);
+        try {
+          const response = await fetch(`${API_BASE}/api/logs`);
+          const data = await response.json();
+          if (data.logs) {
+            setLogs(data.logs);
+            addLocalLog('info', `📊 Fetched ${data.count} logs from server`);
+          }
+        } catch (error) {
+          addLocalLog('error', '❌ Failed to fetch logs: ' + error.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      // Add local log
+      const addLocalLog = (type, message, details = null) => {
+        const newLog = {
+          id: Date.now(),
+          type,
+          message,
+          details,
+          timestamp: new Date().toLocaleTimeString()
+        };
+        setLogs(prev => [newLog, ...prev].slice(0, 100));
+      };
+
+      // Test webhook with sample data
+      const testWebhook = async () => {
+        setTesting(true);
+        addLocalLog('info', '🧪 Sending test webhook...');
+        try {
+          const response = await fetch(`${API_BASE}/api/test-webhook`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              name: 'Test User',
+              email: 'test@example.com',
+              phone: '+919876543210',
+              amount: 50000
+            })
+          });
+          const data = await response.json();
+          
+          if (response.ok) {
+            addLocalLog('success', '✅ Test webhook successful!', data);
+            // Fetch logs after test
+            setTimeout(() => fetchLogs(), 1000);
+          } else {
+            addLocalLog('error', '❌ Test webhook failed', data);
+          }
+        } catch (error) {
+          addLocalLog('error', '❌ Test failed: ' + error.message);
+        } finally {
+          setTesting(false);
+        }
+      };
+
+      // Auto-refresh logs
+      useEffect(() => {
+        let interval;
+        if (autoRefresh) {
+          interval = setInterval(fetchLogs, 5000);
+        }
+        return () => clearInterval(interval);
+      }, [autoRefresh]);
+
+      // Initial status check
+      useEffect(() => {
+        checkStatus();
+      }, []);
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
+          <div className="max-w-6xl mx-auto">
+            {/* Header */}
+            <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
+                    <Webhook className="text-indigo-600" />
+                    Razorpay Webhook Monitor
+                  </h1>
+                  <p className="text-gray-600 mt-1">Real-time Payment Processing Dashboard</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className={`w-3 h-3 rounded-full animate-pulse ${config ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                  <span className="text-sm text-gray-600">{config ? 'Connected' : 'Checking...'}</span>
+                </div>
+              </div>
+
+              {/* System Info */}
+              {config && (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6">
+                  <div className={`p-4 rounded-lg ${config.database === 'Connected' ? 'bg-green-50' : 'bg-red-50'}`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Database className={config.database === 'Connected' ? 'text-green-600' : 'text-red-600'} size={20} />
+                      <span className="text-sm font-semibold text-gray-700">Database</span>
+                    </div>
+                    <p className="text-xs text-gray-600">{config.database}</p>
+                  </div>
+                  <div className={`p-4 rounded-lg ${config.email === 'Configured' ? 'bg-green-50' : 'bg-red-50'}`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Mail className={config.email === 'Configured' ? 'text-green-600' : 'text-red-600'} size={20} />
+                      <span className="text-sm font-semibold text-gray-700">Email</span>
+                    </div>
+                    <p className="text-xs text-gray-600">{config.email}</p>
+                  </div>
+                  <div className={`p-4 rounded-lg ${config.encryption && config.encryption.includes('default') ? 'bg-yellow-50' : 'bg-green-50'}`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <QrCode className={config.encryption && config.encryption.includes('default') ? 'text-yellow-600' : 'text-green-600'} size={20} />
+                      <span className="text-sm font-semibold text-gray-700">Encryption</span>
+                    </div>
+                    <p className="text-xs text-gray-600">{config.encryption ? config.encryption.split('(')[0] : 'N/A'}</p>
+                  </div>
+                  <div className={`p-4 rounded-lg ${config.webhook_secret === 'Configured' ? 'bg-green-50' : 'bg-yellow-50'}`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Webhook className={config.webhook_secret === 'Configured' ? 'text-green-600' : 'text-yellow-600'} size={20} />
+                      <span className="text-sm font-semibold text-gray-700">Webhook Secret</span>
+                    </div>
+                    <p className="text-xs text-gray-600">{config.webhook_secret}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="mt-6 flex flex-wrap gap-3">
+                <button
+                  onClick={testWebhook}
+                  disabled={testing}
+                  className="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
+                >
+                  {testing ? (
+                    <>
+                      <Loader2 className="animate-spin" size={20} />
+                      Testing...
+                    </>
+                  ) : (
+                    <>
+                      <Send size={20} />
+                      Send Test Payment
+                    </>
+                  )}
+                </button>
+                
+                <button
+                  onClick={fetchLogs}
+                  disabled={loading}
+                  className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="animate-spin" size={20} />
+                      Loading...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw size={20} />
+                      Refresh Logs
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={checkStatus}
+                  className="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 flex items-center gap-2 transition-colors"
+                >
+                  <CheckCircle size={20} />
+                  Check Status
+                </button>
+                <button
+                  onClick={() => setLogs([])}
+                  className="bg-gray-200 text-gray-700 px-6 py-3 rounded-lg hover:bg-gray-300 transition-colors"
+                >
+                  Clear Logs
+                </button>
+                <label className="flex items-center gap-2 bg-white border-2 border-gray-300 px-6 py-3 rounded-lg cursor-pointer hover:bg-gray-50">
+                  <input
+                    type="checkbox"
+                    checked={autoRefresh}
+                    onChange={(e) => setAutoRefresh(e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-gray-700">Auto-refresh (5s)</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Webhook URL Info */}
+            <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+              <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <AlertCircle className="text-indigo-600" />
+                Webhook Configuration
+              </h2>
+              <div className="space-y-3 text-sm">
+                <div>
+                  <span className="font-semibold text-gray-700 block mb-1">Webhook URL (Add this to Razorpay):</span>
+                  <code className="bg-gray-100 px-3 py-2 rounded block text-xs break-all">{API_BASE}/api/razorpay-webhook</code>
+                </div>
+                <div>
+                  <span className="font-semibold text-gray-700 block mb-1">Test Endpoint:</span>
+                  <code className="bg-gray-100 px-3 py-2 rounded block text-xs break-all">{API_BASE}/api/test-webhook</code>
+                </div>
+                <div>
+                  <span className="font-semibold text-gray-700 block mb-1">Logs API:</span>
+                  <code className="bg-gray-100 px-3 py-2 rounded block text-xs break-all">{API_BASE}/api/logs</code>
+                </div>
+              </div>
+            </div>
+
+            {/* Activity Logs */}
+            <div className="bg-white rounded-lg shadow-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-800">Activity Logs</h2>
+                <span className="text-sm text-gray-600">{logs.length} logs</span>
+              </div>
+              
+              {logs.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">
+                  <Webhook size={48} className="mx-auto mb-4 opacity-50" />
+                  <p>No activity yet.</p>
+                  <p className="text-sm mt-2">Click "Refresh Logs" to fetch server logs or "Send Test Payment" to test the flow.</p>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {logs.map(log => (
+                    <div
+                      key={log.id}
+                      className={`p-4 rounded-lg border-l-4 ${
+                        log.type === 'success' ? 'bg-green-50 border-green-500' :
+                        log.type === 'error' ? 'bg-red-50 border-red-500' :
+                        log.type === 'warning' ? 'bg-yellow-50 border-yellow-500' :
+                        'bg-blue-50 border-blue-500'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        {log.type === 'success' && <CheckCircle className="text-green-600 mt-1 flex-shrink-0" size={20} />}
+                        {log.type === 'error' && <XCircle className="text-red-600 mt-1 flex-shrink-0" size={20} />}
+                        {log.type === 'warning' && <AlertCircle className="text-yellow-600 mt-1 flex-shrink-0" size={20} />}
+                        {log.type === 'info' && <AlertCircle className="text-blue-600 mt-1 flex-shrink-0" size={20} />}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-semibold text-gray-800 break-words">{log.message}</p>
+                            <span className="text-xs text-gray-500 whitespace-nowrap">{log.timestamp}</span>
+                          </div>
+                          {log.details && (
+                            <pre className="mt-2 text-xs bg-gray-800 text-green-400 p-3 rounded overflow-x-auto">
+                              {JSON.stringify(log.details, null, 2)}
+                            </pre>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Instructions */}
+            <div className="mt-6 bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+              <div className="flex gap-2">
+                <AlertCircle className="text-blue-600 flex-shrink-0 mt-0.5" size={20} />
+                <div className="text-sm">
+                  <p className="font-semibold text-blue-800 mb-2">How to use this dashboard:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-blue-700">
+                    <li><strong>Check Status</strong> - Verify webhook endpoint is active</li>
+                    <li><strong>Send Test Payment</strong> - Simulate a payment to test the entire flow</li>
+                    <li><strong>Refresh Logs</strong> - Fetch real webhook activity from server</li>
+                    <li><strong>Auto-refresh</strong> - Enable to automatically check for new logs every 5 seconds</li>
+                    <li>Real payments from Razorpay will appear in logs automatically</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // Render the app
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<RazorpayWebhookMonitor />);
+  </script>
 </body>
 </html>

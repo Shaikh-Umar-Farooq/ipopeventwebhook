@@ -1,6 +1,11 @@
 // ===========================
 // FILE: api/razorpay-webhook.js (Vercel Serverless Function)
 // ===========================
+// Supports multiple Razorpay webhook events:
+// - payment_link.paid: For payments via Payment Links
+// - payment.captured: For direct payment captures
+// - order.paid: For payments via Razorpay Pages/Orders (most common for Pages)
+// ===========================
 
 const crypto = require('crypto');
 const mysql = require('mysql2/promise');
@@ -243,26 +248,88 @@ module.exports = async (req, res) => {
     
     console.log('Webhook received:', event);
 
-    // Only process payment_link.paid events for our specific payment link
-    if (event !== 'payment_link.paid') {
-      return res.status(200).json({ 
-        status: 'ignored', 
-        message: `Event ${event} ignored` 
-      });
-    }
-
-    const paymentLink = payload.payment_link.entity;
+    let payment, customer, itemDescription, paymentLinkId;
     
-    // Check if it's our payment link
-    if (paymentLink.id !== TARGET_PAYMENT_LINK_ID) {
+    // Handle different event types for Razorpay Pages
+    if (event === 'payment_link.paid') {
+      // Payment Link based payment
+      const paymentLink = payload.payment_link?.entity;
+      
+      if (!paymentLink) {
+        return res.status(400).json({ 
+          status: 'error', 
+          message: 'Invalid payment_link.paid payload' 
+        });
+      }
+      
+      // Check if it's our payment link (if payment link ID is specified)
+      if (TARGET_PAYMENT_LINK_ID && paymentLink.id !== TARGET_PAYMENT_LINK_ID) {
+        return res.status(200).json({ 
+          status: 'ignored', 
+          message: 'Different payment link ID' 
+        });
+      }
+      
+      payment = payload.payment?.entity;
+      customer = paymentLink.customer;
+      itemDescription = paymentLink.description || 'iPOP Event Ticket';
+      paymentLinkId = paymentLink.id;
+      
+    } else if (event === 'payment.captured') {
+      // Direct payment capture
+      payment = payload.payment?.entity;
+      
+      if (!payment) {
+        return res.status(400).json({ 
+          status: 'error', 
+          message: 'Invalid payment.captured payload' 
+        });
+      }
+      
+      // Extract customer from payment notes or contact
+      customer = {
+        name: payment.notes?.name || payment.contact?.name || 'Customer',
+        email: payment.email || payment.notes?.email || '',
+        contact: payment.contact?.phone || payment.notes?.phone || ''
+      };
+      itemDescription = payment.notes?.description || 'iPOP Event Ticket';
+      
+    } else if (event === 'order.paid') {
+      // Order based payment (common for Razorpay Pages)
+      const order = payload.order?.entity;
+      
+      if (!order) {
+        return res.status(400).json({ 
+          status: 'error', 
+          message: 'Invalid order.paid payload' 
+        });
+      }
+      
+      // Get payment from order
+      payment = payload.payment?.entity;
+      customer = {
+        name: order.notes?.name || order.customer_details?.name || 'Customer',
+        email: order.customer_details?.email || order.notes?.email || '',
+        contact: order.customer_details?.contact || order.notes?.phone || ''
+      };
+      itemDescription = order.notes?.description || order.notes?.item || 'iPOP Event Ticket';
+      
+    } else {
+      // Log other events but don't process
+      console.log(`Event ${event} received but not processed`);
       return res.status(200).json({ 
         status: 'ignored', 
-        message: 'Different payment link ID' 
+        message: `Event ${event} not handled. Supported events: payment_link.paid, payment.captured, order.paid` 
       });
     }
 
-    const payment = payload.payment.entity;
-    const customer = paymentLink.customer;
+    // Validate payment exists
+    if (!payment || !payment.id) {
+      return res.status(400).json({ 
+        status: 'error', 
+        message: 'Payment information not found in payload' 
+      });
+    }
 
     // Generate ticket ID
     const ticketId = `TKT-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
@@ -271,16 +338,16 @@ module.exports = async (req, res) => {
     const ticketData = {
       ticket_id: ticketId,
       payment_id: payment.id,
-      order_id: payment.order_id,
-      name: customer.name,
-      email: customer.email,
-      phone: customer.contact,
-      item_purchased: paymentLink.description || 'iPOP Event Ticket',
+      order_id: payment.order_id || payment.id,
+      name: customer?.name || 'Customer',
+      email: customer?.email || '',
+      phone: customer?.contact || '',
+      item_purchased: itemDescription,
       prize_paid: (payment.amount / 100).toFixed(2), // Convert paise to rupees
       date_purchased: new Date(payment.created_at * 1000).toISOString().split('T')[0]
     };
 
-    console.log('Processing ticket:', ticketId);
+    console.log(`Processing ticket for event ${event}:`, ticketId);
 
     // Generate QR code
     const qrCodeDataUrl = await generateQRCode(ticketData);
@@ -291,8 +358,12 @@ module.exports = async (req, res) => {
     console.log('Data stored in database');
 
     // Send email
-    await sendTicketEmail(ticketData, qrCodeDataUrl);
-    console.log('Email sent to:', customer.email);
+    if (ticketData.email) {
+      await sendTicketEmail(ticketData, qrCodeDataUrl);
+      console.log('Email sent to:', ticketData.email);
+    } else {
+      console.warn('No email address found, skipping email send');
+    }
 
     return res.status(200).json({ 
       status: 'success',
@@ -308,71 +379,3 @@ module.exports = async (req, res) => {
     });
   }
 };
-
-// ===========================
-// FILE: package.json
-// ===========================
-/*
-{
-  "name": "razorpay-webhook-handler",
-  "version": "1.0.0",
-  "description": "Razorpay webhook handler for ticket generation",
-  "main": "api/razorpay-webhook.js",
-  "scripts": {
-    "test": "node test-webhook.js"
-  },
-  "dependencies": {
-    "mysql2": "^3.6.5",
-    "nodemailer": "^6.9.7",
-    "qrcode": "^1.5.3"
-  }
-}
-*/
-
-// ===========================
-// FILE: vercel.json
-// ===========================
-/*
-{
-  "version": 2,
-  "builds": [
-    {
-      "src": "api/razorpay-webhook.js",
-      "use": "@vercel/node"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/razorpay-webhook",
-      "dest": "api/razorpay-webhook.js"
-    }
-  ]
-}
-*/
-
-// ===========================
-// FILE: .env.example (Don't commit actual .env!)
-// ===========================
-/*
-
-// ===========================
-// SQL TABLE SCHEMA (Run this in your MySQL database)
-// ===========================
-/*
-CREATE TABLE IF NOT EXISTS ipop_ticket_details (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  ticket_id VARCHAR(50) UNIQUE NOT NULL,
-  payment_id VARCHAR(100) NOT NULL,
-  order_id VARCHAR(100),
-  name VARCHAR(255) NOT NULL,
-  email VARCHAR(255) NOT NULL,
-  phone VARCHAR(20),
-  item_purchased VARCHAR(255),
-  prize_paid DECIMAL(10, 2) NOT NULL,
-  date_purchased DATE NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_email (email),
-  INDEX idx_ticket_id (ticket_id),
-  INDEX idx_payment_id (payment_id)
-);
-*/
