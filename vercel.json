@@ -2,14 +2,14 @@
     "version": 2,
     "builds": [
       {
-        "src": "api/webhook.py",
-        "use": "@vercel/python"
+        "src": "api/razorpay-webhook.js",
+        "use": "@vercel/node"
       }
     ],
     "routes": [
       {
-        "src": "/api/webhook",
-        "dest": "api/webhook.py"
+        "src": "/api/razorpay-webhook",
+        "dest": "api/razorpay-webhook.js"
       }
     ]
   }

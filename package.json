@@ -1,0 +1,14 @@
+{
+    "name": "razorpay-webhook-handler",
+    "version": "1.0.0",
+    "description": "Razorpay webhook handler for ticket generation",
+    "main": "api/razorpay-webhook.js",
+    "scripts": {
+      "test": "node test-webhook.js"
+    },
+    "dependencies": {
+      "mysql2": "^3.6.5",
+      "nodemailer": "^6.9.7",
+      "qrcode": "^1.5.3"
+    }
+  }
