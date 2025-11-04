@@ -6,20 +6,66 @@
   <title>iPOP Webhook Monitor</title>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React and ReactDOM -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- React and ReactDOM (v17 for compatibility) -->
+  <script crossorigin src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
   <!-- Babel Standalone for JSX transformation -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <!-- Lucide React Icons -->
   <script src="https://unpkg.com/lucide-react@latest/dist/umd/lucide-react.js"></script>
+  <style>
+    /* Loading state */
+    #root:empty::before {
+      content: "Loading...";
+      display: block;
+      text-align: center;
+      padding: 50px;
+      color: #666;
+    }
+  </style>
 </head>
 <body>
   <div id="root"></div>
   
   <script type="text/babel">
+    // Error handler
+    window.addEventListener('error', function(e) {
+      console.error('Error:', e.error);
+      const root = document.getElementById('root');
+      if (root && root.innerHTML === '') {
+        root.innerHTML = '<div style="padding: 50px; text-align: center;"><h1>Error Loading App</h1><p>' + (e.message || 'Unknown error') + '</p><p>Check browser console for details.</p></div>';
+      }
+    });
+
+    // Check if React is loaded
+    if (typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
+      document.getElementById('root').innerHTML = '<div style="padding: 50px; text-align: center;"><h1>Loading Error</h1><p>React libraries failed to load. Please refresh the page.</p></div>';
+    }
+
     const { useState, useEffect } = React;
-    const { CheckCircle, XCircle, Loader2, Database, Mail, QrCode, Webhook, AlertCircle, RefreshCw, Send } = lucideReact;
+    
+    // Fallback icons if lucide-react doesn't load
+    const IconFallback = ({ name, className, size = 20 }) => {
+      return React.createElement('span', { className, style: { display: 'inline-block', width: size, height: size, fontSize: size } }, name.substring(0, 1));
+    };
+    
+    let CheckCircle, XCircle, Loader2, Database, Mail, QrCode, Webhook, AlertCircle, RefreshCw, Send;
+    
+    if (typeof lucideReact !== 'undefined' && lucideReact) {
+      ({ CheckCircle, XCircle, Loader2, Database, Mail, QrCode, Webhook, AlertCircle, RefreshCw, Send } = lucideReact);
+    } else {
+      // Fallback to simple span elements
+      CheckCircle = (props) => IconFallback({ name: '✓', ...props });
+      XCircle = (props) => IconFallback({ name: '✗', ...props });
+      Loader2 = (props) => IconFallback({ name: '⟳', ...props });
+      Database = (props) => IconFallback({ name: 'D', ...props });
+      Mail = (props) => IconFallback({ name: 'M', ...props });
+      QrCode = (props) => IconFallback({ name: 'Q', ...props });
+      Webhook = (props) => IconFallback({ name: 'W', ...props });
+      AlertCircle = (props) => IconFallback({ name: '!', ...props });
+      RefreshCw = (props) => IconFallback({ name: '↻', ...props });
+      Send = (props) => IconFallback({ name: '→', ...props });
+    }
 
     const RazorpayWebhookMonitor = () => {
       const [logs, setLogs] = useState([]);
@@ -325,9 +371,25 @@
       );
     };
 
-    // Render the app
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<RazorpayWebhookMonitor />);
+    // Render the app - using ReactDOM.render for compatibility
+    // Wait for DOM to be ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function() {
+        try {
+          ReactDOM.render(<RazorpayWebhookMonitor />, document.getElementById('root'));
+        } catch (error) {
+          console.error('Render error:', error);
+          document.getElementById('root').innerHTML = '<div style="padding: 50px; text-align: center;"><h1>Render Error</h1><p>' + error.message + '</p></div>';
+        }
+      });
+    } else {
+      try {
+        ReactDOM.render(<RazorpayWebhookMonitor />, document.getElementById('root'));
+      } catch (error) {
+        console.error('Render error:', error);
+        document.getElementById('root').innerHTML = '<div style="padding: 50px; text-align: center;"><h1>Render Error</h1><p>' + error.message + '</p></div>';
+      }
+    }
   </script>
 </body>
 </html>
