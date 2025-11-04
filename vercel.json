@@ -4,12 +4,36 @@
       {
         "src": "api/razorpay-webhook.js",
         "use": "@vercel/node"
+      },
+      {
+        "src": "api/logs.js",
+        "use": "@vercel/node"
+      },
+      {
+        "src": "api/test-webhook.js",
+        "use": "@vercel/node"
+      },
+      {
+        "src": "public/**",
+        "use": "@vercel/static"
       }
     ],
     "routes": [
       {
         "src": "/api/razorpay-webhook",
         "dest": "api/razorpay-webhook.js"
+      },
+      {
+        "src": "/api/logs",
+        "dest": "api/logs.js"
+      },
+      {
+        "src": "/api/test-webhook",
+        "dest": "api/test-webhook.js"
+      },
+      {
+        "src": "/(.*)",
+        "dest": "public/$1"
       }
     ]
   }
